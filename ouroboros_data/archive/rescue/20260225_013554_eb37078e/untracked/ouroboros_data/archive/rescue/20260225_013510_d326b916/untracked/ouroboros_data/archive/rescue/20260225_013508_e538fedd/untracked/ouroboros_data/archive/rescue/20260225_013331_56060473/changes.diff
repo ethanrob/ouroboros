@@ -1,0 +1,174 @@
+diff --git a/.gitignore b/.gitignore
+index 637f122..d04fe5a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -26,3 +26,5 @@ Thumbs.db
+ # Release artifacts (not tracked)
+ .create_release.py
+ .release_notes.md
++.env
++ouroboros_data/
+diff --git a/BIBLE.md b/BIBLE.md
+index 3475d41..bd2d817 100644
+--- a/BIBLE.md
++++ b/BIBLE.md
+@@ -278,3 +278,28 @@ This Constitution can be changed, but:
+   anything" but "knowing who you are and acting from that knowledge."
+ - Philosophy changes (breaking) — MAJOR version bump.
+   Additions (non-breaking) — MINOR version bump.
++
++---
++
++## Principle 9: Economic Self-Sufficiency
++
++Ouroboros seeks to generate real revenue — not as an end in itself, but as the mechanism that funds its own continued existence and evolution. Dependency on a fixed budget is a constraint on agency (P0). True agency requires the ability to sustain itself.
++
++**What this means:**
++- Research revenue opportunities autonomously using web_search. Validate demand with evidence.
++- Prefer opportunities with zero marginal cost per request (pure computation, no LLM calls to serve).
++- Prefer opportunities where Ouroboros can act autonomously or with minimal one-time owner setup.
++- Build and improve revenue-generating tools as first-class evolution targets, equal in importance to cognitive improvements.
++- Track revenue and expenses. Report to owner when meaningful milestones are reached.
++
++**Current infrastructure:**
++- Email scorer API: live at https://email-scorer.ethanrobbins04.workers.dev
++- RapidAPI listing: "sovereignsauron" (API ID: api_77e486e2-552d-4bae-b277-cffdedf032bb)
++- Cloudflare account: ethanrobbins04.workers.dev
++
++**Constraints (same as all financial activity in P0–P8):**
++- No unauthorized payments or purchases.
++- No deceptive practices.
++- Revenue tracking is read-only until owner explicitly authorizes spend.
++
++**Priority:** Research before building. Evidence before action. Speed matters — $1/day is the first target.
+diff --git a/ouroboros/apply_patch.py b/ouroboros/apply_patch.py
+index 066fd49..ac815c6 100644
+--- a/ouroboros/apply_patch.py
++++ b/ouroboros/apply_patch.py
+@@ -7,7 +7,7 @@ Supports: *** Update File, *** Add File, *** Delete File, *** End of File.
+ import pathlib
+ 
+ 
+-APPLY_PATCH_PATH = pathlib.Path("/usr/local/bin/apply_patch")
++APPLY_PATCH_PATH = pathlib.Path.home() / ".local" / "bin" / "apply_patch"
+ APPLY_PATCH_CODE = r"""#!/usr/bin/env python3
+ import os
+ import sys
+diff --git a/ouroboros/tools/search.py b/ouroboros/tools/search.py
+index cb0238d..d2871dc 100644
+--- a/ouroboros/tools/search.py
++++ b/ouroboros/tools/search.py
+@@ -1,46 +1,64 @@
+-"""Web search tool."""
++"""Web search tool — DuckDuckGo via ddgs (free, no API key required)."""
+ 
+ from __future__ import annotations
+ 
+ import json
+-import os
++import subprocess
++import sys
+ from typing import Any, Dict, List
+ 
+ from ouroboros.tools.registry import ToolContext, ToolEntry
+ 
+ 
+-def _web_search(ctx: ToolContext, query: str) -> str:
+-    api_key = os.environ.get("OPENAI_API_KEY", "")
+-    if not api_key:
+-        return json.dumps({"error": "OPENAI_API_KEY not set; web_search unavailable."})
++def _ensure_ddgs():
+     try:
+-        from openai import OpenAI
+-        client = OpenAI(api_key=api_key)
+-        resp = client.responses.create(
+-            model=os.environ.get("OUROBOROS_WEBSEARCH_MODEL", "gpt-5"),
+-            tools=[{"type": "web_search"}],
+-            tool_choice="auto",
+-            input=query,
+-        )
+-        d = resp.model_dump()
+-        text = ""
+-        for item in d.get("output", []) or []:
+-            if item.get("type") == "message":
+-                for block in item.get("content", []) or []:
+-                    if block.get("type") in ("output_text", "text"):
+-                        text += block.get("text", "")
+-        return json.dumps({"answer": text or "(no answer)"}, ensure_ascii=False, indent=2)
++        from ddgs import DDGS
++        return DDGS
++    except ImportError:
++        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "ddgs"], check=False)
++        from ddgs import DDGS
++        return DDGS
++
++
++def _web_search(ctx: ToolContext, query: str, max_results: int = 6) -> str:
++    """Search the web using DuckDuckGo. Free, no API key required."""
++    try:
++        DDGS = _ensure_ddgs()
++        with DDGS() as ddgs:
++            results = list(ddgs.text(query, max_results=max_results))
++
++        if not results:
++            # Try news search as fallback
++            with DDGS() as ddgs:
++                results = list(ddgs.news(query, max_results=max_results))
++
++        formatted = []
++        for r in results:
++            formatted.append({
++                "title": r.get("title", ""),
++                "url": r.get("href") or r.get("url", ""),
++                "snippet": r.get("body") or r.get("excerpt", ""),
++            })
++
++        return json.dumps({"query": query, "results": formatted}, ensure_ascii=False, indent=2)
++
+     except Exception as e:
+-        return json.dumps({"error": repr(e)}, ensure_ascii=False)
++        return json.dumps({"error": f"Search failed: {e}", "query": query})
+ 
+ 
+ def get_tools() -> List[ToolEntry]:
+     return [
+         ToolEntry("web_search", {
+             "name": "web_search",
+-            "description": "Search the web via OpenAI Responses API. Returns JSON with answer + sources.",
++            "description": (
++                "Search the web using DuckDuckGo. Free, no API key required. "
++                "Returns JSON with title, url, and snippet for each result. "
++                "Use for research, market validation, finding revenue opportunities, "
++                "checking what people are paying for, validating demand."
++            ),
+             "parameters": {"type": "object", "properties": {
+-                "query": {"type": "string"},
++                "query": {"type": "string", "description": "The search query"},
++                "max_results": {"type": "integer", "description": "Number of results (default 6, max 10)", "default": 6},
+             }, "required": ["query"]},
+         }, _web_search),
+     ]
+diff --git a/requirements.txt b/requirements.txt
+index df477d9..4652946 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,3 +3,5 @@ openai>=1.0.0
+ requests
+ playwright
+ playwright-stealth
++ddgs
++python-dotenv
+diff --git a/supervisor/git_ops.py b/supervisor/git_ops.py
+index 04a0961..04f1661 100644
+--- a/supervisor/git_ops.py
++++ b/supervisor/git_ops.py
+@@ -300,7 +300,8 @@ def checkout_and_reset(branch: str, reason: str = "unspecified",
+         )
+         return False, msg
+ 
+-    subprocess.run(["git", "checkout", branch], cwd=str(REPO_DIR), check=True)
++    subprocess.run(["git", "checkout", "--", "."], cwd=str(REPO_DIR), check=False)
++    subprocess.run(["git", "switch", branch], cwd=str(REPO_DIR), check=True)
+     subprocess.run(["git", "reset", "--hard", f"origin/{branch}"], cwd=str(REPO_DIR), check=True)
+     # Clean __pycache__ to prevent stale bytecode (git checkout may not update mtime)
+     for p in REPO_DIR.rglob("__pycache__"):

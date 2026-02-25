@@ -1,0 +1,7 @@
+M .gitignore
+ M BIBLE.md
+ M ouroboros/apply_patch.py
+ M ouroboros/tools/search.py
+ M requirements.txt
+ M supervisor/git_ops.py
+?? run_local.py
